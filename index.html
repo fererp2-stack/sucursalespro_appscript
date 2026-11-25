@@ -86,5 +86,56 @@
       marco.src = destino.toString();
     }
   </script>
+  <!-- ============== ESCÁNER CON CÁMARA ==============
+       Apps Script corre el sistema dentro de un marco de Google que NO tiene permiso de cámara.
+       Esta página (la máscara) sí lo tiene: el sistema le pide "abrir", la máscara muestra la cámara y le devuelve cada código leído.
+       Solo atiende pedidos que llegan desde el marco de Google (*.googleusercontent.com). -->
+  <style>
+    #escaner { display: none; position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .92); color: #fff; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; }
+    #escaner.abierto { display: flex; }
+    #escaner-video { width: min(92vw, 520px); border-radius: 14px; overflow: hidden; background: #000; }
+    #escaner p { margin: 0; font-size: 14px; color: #d4d4d8; text-align: center; }
+    #escaner b { font-size: 18px; }
+    #escaner button { border: 0; border-radius: 999px; padding: 12px 26px; font-size: 16px; font-weight: 700; background: #fff; color: #18181b; cursor: pointer; }
+  </style>
+  <div id="escaner" role="dialog" aria-label="Escáner con cámara">
+    <b>Escanea los códigos de barras</b>
+    <div id="escaner-video"></div>
+    <p id="escaner-msg">Apunta al código. Cada lectura se agrega a la venta.</p>
+    <button type="button" id="escaner-cerrar">Cerrar cámara</button>
+  </div>
+  <script>
+    (function () {
+      var capa = document.getElementById('escaner'), msg = document.getElementById('escaner-msg'), lector = null, destino = null, origen = '', ultimo = '', ultimoAt = 0;
+      var deGoogle = function (o) { try { return /\.googleusercontent\.com$/.test(new URL(o).hostname); } catch (e) { return false; } };
+      var enviar = function (d) { if (destino) { d.rs = 'escaner'; destino.postMessage(d, origen); } };
+      var cargar = function () { return window.Html5Qrcode ? Promise.resolve() : new Promise(function (ok, mal) {
+        var s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js'; s.onload = ok; s.onerror = mal; document.head.appendChild(s); }); };
+      var cerrar = function () {
+        capa.className = '';
+        if (lector) { var l = lector; lector = null; l.stop().then(function () { l.clear(); }).catch(function () {}); }
+        enviar({ accion: 'cerrado' });
+      };
+      var abrir = function () {
+        capa.className = 'abierto'; msg.textContent = 'Abriendo la cámara…';
+        cargar().then(function () {
+          lector = new Html5Qrcode('escaner-video');
+          return lector.start({ facingMode: 'environment' }, { fps: 12, qrbox: { width: 280, height: 150 } }, function (codigo) {
+            var t = Date.now(); if (codigo === ultimo && t - ultimoAt < 1200) return;      // el mismo código no se repite enseguida
+            ultimo = codigo; ultimoAt = t; msg.textContent = 'Leído: ' + codigo; enviar({ accion: 'codigo', codigo: String(codigo).slice(0, 64) });
+          }, function () {});
+        }).then(function () { msg.textContent = 'Apunta al código. Cada lectura se agrega a la venta.'; })
+          .catch(function () { msg.textContent = 'No se pudo abrir la cámara. Revisa que el navegador tenga permiso de cámara para esta página (candado junto a la dirección) y vuelve a intentar.'; });
+      };
+      document.getElementById('escaner-cerrar').addEventListener('click', cerrar);
+      window.addEventListener('message', function (ev) {
+        var d = ev.data; if (!d || d.rs !== 'escaner' || !deGoogle(ev.origin)) return;
+        destino = ev.source; origen = ev.origin;
+        if (d.accion === 'hola') enviar({ accion: 'listo' });
+        else if (d.accion === 'abrir') abrir();
+        else if (d.accion === 'cerrar') cerrar();
+      });
+    })();
+  </script>
 </body>
 </html>
